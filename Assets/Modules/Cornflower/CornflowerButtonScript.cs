@@ -169,8 +169,15 @@ public class CornflowerButtonScript : MonoBehaviour
 
     private Vector3 childPos(Component child)
     {
-        var renderer = child.GetComponent<Renderer>() ?? child.GetComponentInChildren<Renderer>();
-        return renderer != null ? renderer.bounds.center : child.transform.position;
+        try
+        {
+            var renderer = child.GetComponent<Renderer>() ?? child.GetComponentInChildren<Renderer>();
+            return renderer != null ? renderer.bounds.center : child.transform.position;
+        }
+        catch
+        {
+            return default(Vector3);
+        }
     }
 
     private float childDist(Component child)
