@@ -44,16 +44,17 @@ public class CornflowerButtonScript : MonoBehaviour
     private Component _lastHighlighted;
     private bool _initialized;
     private string[] _ignoreList;
-    private static readonly string[] _defaultIgnoreList = { "Cursor Maze", "Hidden In Plain Sight" };
+    private static readonly string[] _defaultIgnoreList = { "Cursor Maze", "Hidden In Plain Sight", "Find The Invisible Cow" };
 
     private readonly HashSet<Component> _assigned = new HashSet<Component>();
+
+    private const int _maxSelectablesPerModule = 30;
 
     private void Start()
     {
         _moduleId = _moduleIdCounter++;
         ButtonSelectable.OnInteract += ButtonPress;
         ButtonSelectable.OnInteractEnded += ButtonRelease;
-
 
         do
         {
@@ -137,7 +138,7 @@ public class CornflowerButtonScript : MonoBehaviour
     private IEnumerator PeriodicSelectableDiscovery(Component parent)
     {
         yield return new WaitForSeconds(Rnd.Range(0f, 10f));
-        while (true)
+        while (parent != null)
         {
             RediscoverSelectables(parent, true);
             yield return new WaitForSeconds(10f);
@@ -148,12 +149,23 @@ public class CornflowerButtonScript : MonoBehaviour
     {
         return delegate
         {
-            if (ReferenceEquals(parent, _selectables[_curSelectable].Parent) && ReferenceEquals(_lastHighlighted, _selectables[_curSelectable].Child))
+            if (!_initialized || parent == null || _curSelectable < 0 || _curSelectable >= _selectables.Count)
+                return;
+
+            var current = _selectables[_curSelectable];
+            if (current.Child == null || !ReferenceEquals(parent, current.Parent) || !ReferenceEquals(_lastHighlighted, current.Child))
+                return;
+
+            for (int i = 1; i <= _selectables.Count; i++)
             {
-                do
-                    setCurSelectable((_curSelectable + 1) % _selectables.Count);
-                while (!_selectables[_curSelectable].Child.gameObject.activeInHierarchy);
+                int next = (_curSelectable + i) % _selectables.Count;
+                var p = _selectables[next];
+                if (p.Parent == null || p.Child == null || !p.Child.gameObject.activeInHierarchy)
+                    continue;
+
+                setCurSelectable(next);
                 setSelectedArrows(_selectedArrows + 1);
+                return;
             }
         };
     }
@@ -169,15 +181,10 @@ public class CornflowerButtonScript : MonoBehaviour
 
     private Vector3 childPos(Component child)
     {
-        try
-        {
-            var renderer = child.GetComponent<Renderer>() ?? child.GetComponentInChildren<Renderer>();
-            return renderer != null ? renderer.bounds.center : child.transform.position;
-        }
-        catch
-        {
-            return default(Vector3);
-        }
+        var renderer = child.GetComponent<Renderer>();
+        if (renderer == null)
+            renderer = child.GetComponentInChildren<Renderer>();
+        return renderer != null ? renderer.bounds.center : child.transform.position;
     }
 
     private float childDist(Component child)
@@ -202,19 +209,25 @@ public class CornflowerButtonScript : MonoBehaviour
 
     private void RediscoverSelectables(Component parent, bool findNewSelectable)
     {
-        var has = _selectables.Count > 0;
+        var has = _curSelectable >= 0 && _curSelectable < _selectables.Count;
         var oldPair = has ? _selectables[_curSelectable] : default(ParentChildPair);
-        var oldDist = has ? childDist(_selectables[_curSelectable].Child) : 0;
+        var oldDist = has && oldPair.Child != null ? childDist(oldPair.Child) : 0f;
 
-        _selectables.RemoveAll(pair => ReferenceEquals(pair.Parent, parent));
+        _selectables.RemoveAll(pair => pair.Parent == null || pair.Child == null || ReferenceEquals(pair.Parent, parent));
+        _assigned.RemoveWhere(child => child == null);
 
-        if (getChildren(parent) != null)
-            foreach (var child in getChildren(parent).Where(c => c != null).Distinct())
+        var children = parent != null ? getChildren(parent) : null;
+        var validChildren = children == null ? new Component[0] : children.Where(c => c != null).Distinct().ToArray();
+
+        if (validChildren.Length <= _maxSelectablesPerModule)
+            foreach (var child in validChildren)
             {
                 if (_assigned.Add(child))
                 {
                     AssignDelegate(child, _onHighlightField, delegate
                     {
+                        if (child == null)
+                            return;
                         if (_highlightEndedCoroutine != null)
                             StopCoroutine(_highlightEndedCoroutine);
                         _lastHighlighted = child;
@@ -222,6 +235,8 @@ public class CornflowerButtonScript : MonoBehaviour
 
                     AssignDelegate(child, _onHighlightEndedField, delegate
                     {
+                        if (child == null)
+                            return;
                         if (_highlightEndedCoroutine != null)
                             StopCoroutine(_highlightEndedCoroutine);
                         _highlightEndedCoroutine = StartCoroutine(endHighlight(child));
@@ -230,6 +245,11 @@ public class CornflowerButtonScript : MonoBehaviour
                 _selectables.Add(new ParentChildPair { Parent = parent, Child = child });
             }
         SortSelectables();
+        if (_selectables.Count == 0)
+        {
+            _curSelectable = 0;
+            return;
+        }
 
         int newSelectable = _curSelectable;
         if (findNewSelectable)
@@ -249,6 +269,9 @@ public class CornflowerButtonScript : MonoBehaviour
 
     private void SortSelectables()
     {
+        if (_selectables.Count == 0)
+            return;
+
         _selectables.Sort((a, b) => Math.Sign(childDist(a.Child) - childDist(b.Child)));
 
         var last = _selectables[0];
@@ -344,14 +367,24 @@ public class CornflowerButtonScript : MonoBehaviour
             ArrowRotators[i].localRotation = _arrowAngles[i];
         }
 
-        tryAgain:
-        var curChildren = (Array) _childrenField.GetValue(_selectables[_curSelectable].Parent);
-        if (!_selectables[_curSelectable].Child.gameObject.activeInHierarchy
-                || curChildren == null
-                || !Enumerable.Range(0, curChildren.Length).Any(ix => ReferenceEquals(curChildren.GetValue(ix), _selectables[_curSelectable].Child)))
+        if (_selectables.Count == 0)
+            return;
+
+        if (_curSelectable < 0 || _curSelectable >= _selectables.Count)
+            _curSelectable = 0;
+
+        var p = _selectables[_curSelectable];
+        if (p.Parent == null || p.Child == null || !p.Child.gameObject.activeInHierarchy)
         {
-            RediscoverSelectables(_selectables[_curSelectable].Parent, true);
-            goto tryAgain;
+            RediscoverSelectables(p.Parent, true);
+            return;
+        }
+
+        var curChildren = getChildren(p.Parent);
+        if (curChildren == null || !curChildren.Any(x => ReferenceEquals(x, p.Child)))
+        {
+            RediscoverSelectables(p.Parent, true);
+            return;
         }
 
         var desiredAngleMain = childAngle(_selectables[_curSelectable].Child);
