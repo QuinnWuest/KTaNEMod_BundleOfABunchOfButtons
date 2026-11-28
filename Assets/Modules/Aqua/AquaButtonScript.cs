@@ -482,23 +482,17 @@ public class AquaButtonScript : MonoBehaviour
         {
             var colors = new[] { "r", "y", "b" };
             var fruits = new[] { "a", "b", "c", "g", "l", "p", "s" };
-            var pieces = m.Groups[1].Value.Split(new[] { ' ', ',', ';', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
             var ixs = new List<FruitInfo>();
-            for (var i = 0; i < pieces.Length; i++)
+
+            foreach (Match fruitMatch in Regex.Matches(m.Groups[1].Value, @"([ryb]|red|yellow|blue)\s*(a(?:pple)?|b(?:anana)?|c(?:herry)?|g(?:rape)?|l(?:emon)?|p(?:ineapple)?|s(?:trawberry)?)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
             {
-                pieces[i] = pieces[i].ToLowerInvariant();
-                int cIx, frIx;
-                if (pieces[i].Length == 2 && (cIx = Array.IndexOf(colors, pieces[i].Substring(0, 1))) != -1 && (frIx = Array.IndexOf(fruits, pieces[i].Substring(1))) != -1)
-                {
-                    ixs.Add(new FruitInfo((FruitModel)frIx, (FruitColor)cIx));
-                }
-                else if ((cIx = Array.IndexOf(colors, pieces[i].Substring(0, 1))) != -1 && i < pieces.Length - 1 && (frIx = Array.IndexOf(fruits, pieces[i + 1].Substring(0, 2))) != -1)
-                {
-                    ixs.Add(new FruitInfo((FruitModel)frIx, (FruitColor)cIx));
-                    i++;
-                }
-                else
-                    yield break;
+                int cIx = Array.IndexOf(colors,
+                    fruitMatch.Groups[1].Value.Substring(0, 1).ToLowerInvariant());
+
+                int frIx = Array.IndexOf(fruits,
+                    fruitMatch.Groups[2].Value.Substring(0, 1).ToLowerInvariant());
+
+                ixs.Add(new FruitInfo((FruitModel)frIx, (FruitColor)cIx));
             }
 
             var ix = Enumerable.Range(0, _puzzle.Clues.Length)
